@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: wsclient
+Description: WebSocket Client Library based on libwebsockets
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lwsclient -lwebsockets -lpthread -lssl -lcrypto -lz -lm
+Cflags: -I${includedir} -I${includedir}/libwebsockets -D_POSIX_C_SOURCE=200809L
