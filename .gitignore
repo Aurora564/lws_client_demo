@@ -1,0 +1,23 @@
+# 构建产物
+build/
+output/
+example
+*.o
+*.a
+*.so
+*.so.*
+*.pc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 工具缓存
+.cache/
+compile_commands.json
+
+# aider
+.aider*

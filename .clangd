@@ -1,0 +1,6 @@
+CompileFlags:
+  Add:
+    - -I/home/aurora/project/lws_client_demo/output/include
+    - -I/home/aurora/project/lws_client_demo/output/include/libwebsockets
+    - -I/home/aurora/project/lws_client_demo/src
+    - -D_POSIX_C_SOURCE=200809L
