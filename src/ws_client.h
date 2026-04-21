@@ -119,8 +119,14 @@ void wsl_set_path(wsl_client_t *c, const char *path);
 int wsl_start(wsl_client_t *c);
 
 /*
- * wsl_stop - 优雅停止并等待 service 退出
- * 之后可安全的调用 wsl_destroy()
+ * wsl_stop - 优雅停止并等待 service 线程退出，同时销毁 lws_context
+ * 之后可安全调用 wsl_destroy() 释放内存
+ */
+void wsl_stop(wsl_client_t *c);
+
+/*
+ * wsl_destroy - 释放 wsl_client_t 及其所有内存
+ * 必须在 wsl_stop() 之后调用，否则 service 线程仍在运行，行为未定义
  */
 void wsl_destroy(wsl_client_t *c);
 

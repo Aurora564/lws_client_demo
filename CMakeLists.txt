@@ -11,6 +11,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # 编译器选项
+add_compile_definitions(_POSIX_C_SOURCE=200809L)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
 set(CMAKE_C_FLAGS_DEBUG "-g -O0")
 set(CMAKE_C_FLAGS_RELEASE "-O2")
@@ -63,24 +64,25 @@ set_target_properties(wsclient PROPERTIES
 )
 
 # ==================== 编译示例程序（可选）====================
-option(BUILD_EXAMPLE "Build example program" ON)
+option(BUILD_EXAMPLES "Build example programs" ON)
 
-if(BUILD_EXAMPLE)
-    add_executable(example example.c)
+if(BUILD_EXAMPLES)
+    set(EXAMPLES_DIR ${CMAKE_SOURCE_DIR}/examples)
 
-    target_include_directories(example PRIVATE
-        ${SRC_DIR}
-    )
+    # 辅助函数：为每个示例创建编译目标
+    function(add_example name)
+        add_executable(${name} ${EXAMPLES_DIR}/${name}.c)
+        target_include_directories(${name} PRIVATE ${SRC_DIR})
+        target_link_libraries(${name} PRIVATE wsclient)
+        set_target_properties(${name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${BUILD_APP_DIR}
+            INSTALL_RPATH "${LWS_LIB_DIR}"
+            BUILD_WITH_INSTALL_RPATH TRUE
+        )
+    endfunction()
 
-    target_link_libraries(example PRIVATE
-        wsclient
-    )
-
-    # 设置 rpath
-    set_target_properties(example PROPERTIES
-        INSTALL_RPATH "${LWS_LIB_DIR}"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
+    add_example(example)
+    add_example(asr_multi_session)
 endif()
 
 # ==================== 安装规则 ====================
@@ -114,6 +116,6 @@ message(STATUS "========================================")
 message(STATUS "  Build type:        ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Install prefix:    ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "  Output dir:        ${OUTPUT_DIR}")
-message(STATUS "  Build example:     ${BUILD_EXAMPLE}")
+message(STATUS "  Build examples:    ${BUILD_EXAMPLES}")
 message(STATUS "========================================")
 message(STATUS "")
