@@ -27,6 +27,7 @@
 
 #pragma once
 #include "ws_client.h"   /* LwsClientRet_e, wsld_rx_cb_t */
+#include "ws_internal.h" /* wsl_event_hooks_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,6 +84,17 @@ void wsp_set_reconnect(wsp_client_t *c, int init_ms, int max_ms);
 void wsp_set_queue_limit(wsp_client_t *c, int max_msgs, int max_bytes);
 void wsp_set_ssl(wsp_client_t *c, int enabled, int skip_verify);
 void wsp_set_path(wsp_client_t *c, const char *path);
+
+/*
+ * wsp_set_event_hooks - 设置事件钩子表 (须在 wsp_pool_add 前调用)
+ *
+ * hooks:  事件钩子表, 为 NULL 或各字段为 NULL 表示不使用对应钩子.
+ *         hooks 指向的内存必须在 wsp_pool_add 之后保持有效.
+ * user:   透传给各钩子回调的用户指针
+ */
+void wsp_set_event_hooks(wsp_client_t *c,
+                          const wsl_event_hooks_t *hooks,
+                          void *user);
 
 /* ---- 连接池管理 ----------------------------------------------- */
 

@@ -196,6 +196,7 @@ if(BUILD_EXAMPLES)
     add_pool_example(pool_multi_client)
     add_pool_example(pool_asr_sessions)
     add_pool_example(xfyun_tts)
+    add_pool_example(pool_hooks_demo)
 
     add_v2_example(v2_hooks_demo)
 

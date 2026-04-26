@@ -11,6 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+struct lws;  /* 前置声明, 用于钩子回调签名 */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,6 +44,25 @@ typedef struct {
     size_t          len;
     size_t          cap;
 } ws_frag_buf_t;
+
+/* ====================================================================
+ * 事件钩子表 — v2 / pool 通用
+ *
+ * 各钩子均为可选, NULL 表示不使用.
+ * 各钩子在 service 线程中同步调用, 不应执行耗时操作.
+ * ==================================================================== */
+typedef struct {
+    void (*on_connected)(void *user);
+    void (*on_disconnected)(void *user);
+    void (*on_error)(const char *msg, void *user);
+    void (*on_message)(const char *data, size_t len,
+                       int is_binary, void *user);
+    int  (*on_heartbeat_tick)(void *user);
+    int  (*on_reconnect_decision)(int fail_count,
+                                  int current_delay_ms,
+                                  void *user);
+    void (*on_handshake_header)(struct lws *wsi, void *user);
+} wsl_event_hooks_t;
 
 /* ------------------------------------------------------------------ */
 /* 内联工具函数                                                       */

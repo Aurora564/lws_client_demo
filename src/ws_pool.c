@@ -45,6 +45,10 @@ struct wsp_client {
     wsld_rx_cb_t  rx_cb;
     void        *user;
 
+    /* 事件钩子 */
+    const wsl_event_hooks_t *hooks;
+    void                    *hook_user;
+
     int          use_ssl;
     int          ssl_skip_verify;
 
@@ -53,6 +57,7 @@ struct wsp_client {
     int          reconnect_init_ms;
     int          reconnect_max_ms;
     int          reconnect_delay_ms;
+    int          reconnect_fail_count;
 
     size_t       max_queue_msgs;
     size_t       max_queue_bytes;
@@ -152,12 +157,28 @@ static void sul_reconnect_cb(lws_sorted_usec_list_t *sul);
 static void schedule_reconnect(wsp_client_t *c)
 {
     if (c->stopping) return;
-    lws_sul_schedule(c->pool->ctx, 0, &c->sul, sul_reconnect_cb,
-                     (lws_usec_t)c->reconnect_delay_ms * 1000);
-    c->reconnect_delay_ms *= 2;
-    if (c->reconnect_delay_ms > c->reconnect_max_ms)
-        c->reconnect_delay_ms = c->reconnect_max_ms;
+
+    /* 指数退避 */
+    int delay = c->reconnect_delay_ms;
+    delay *= 2;
+    if (delay > c->reconnect_max_ms)
+        delay = c->reconnect_max_ms;
+
+    /* 事件钩子: 允许业务层覆盖重连决策 */
+    if (c->hooks && c->hooks->on_reconnect_decision) {
+        int ret = c->hooks->on_reconnect_decision(
+                    c->reconnect_fail_count, delay, c->hook_user);
+        if (ret < 0) {
+            c->state = STATE_STOPPED;
+            return;
+        }
+        delay = ret;
+    }
+
+    c->reconnect_delay_ms = delay;
     c->state = STATE_RECONNECT_WAIT;
+    lws_sul_schedule(c->pool->ctx, 0, &c->sul, sul_reconnect_cb,
+                     (lws_usec_t)delay * 1000);
 }
 
 /* ======================================================================
@@ -220,9 +241,12 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
     case LWS_CALLBACK_CLIENT_ESTABLISHED:
         c->state = STATE_CONNECTED;
         c->reconnect_delay_ms = c->reconnect_init_ms;
+        c->reconnect_fail_count = 0;
         c->send_ping  = 0;
         c->ping_pending = 0;
         lws_set_timer_usecs(wsi, (lws_usec_t)c->ping_interval_ms * 1000);
+        if (c->hooks && c->hooks->on_connected)
+            c->hooks->on_connected(c->hook_user);
         break;
 
     /* ------------------------------------------------------------------ */
@@ -234,6 +258,9 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
         if (first && final && remain == 0) {
             if (c->rx_cb)
                 c->rx_cb((const char *)in, len, lws_frame_is_binary(wsi), c->user);
+            if (c->hooks && c->hooks->on_message)
+                c->hooks->on_message((const char *)in, len,
+                                     lws_frame_is_binary(wsi), c->hook_user);
         } else {
             if (first) c->frag_len = 0;
             if (frag_append(c, (const unsigned char *)in, len) < 0)
@@ -242,6 +269,9 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
                 if (c->rx_cb)
                     c->rx_cb((const char *)c->frag_buf, c->frag_len,
                              lws_frame_is_binary(wsi), c->user);
+                if (c->hooks && c->hooks->on_message && c->frag_len > 0)
+                    c->hooks->on_message((const char *)c->frag_buf, c->frag_len,
+                                         lws_frame_is_binary(wsi), c->hook_user);
                 c->frag_len = 0;
             }
         }
@@ -340,6 +370,15 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
     /* ------------------------------------------------------------------ */
     case LWS_CALLBACK_TIMER:
         if (!c) break;
+        /* 事件钩子: 自定义心跳, 返回非 0 表示业务层自行处理 */
+        if (c->hooks && c->hooks->on_heartbeat_tick) {
+            if (c->hooks->on_heartbeat_tick(c->hook_user)) {
+                if (c->ping_interval_ms > 0 && c->wsi)
+                    lws_set_timer_usecs(c->wsi,
+                                        (lws_usec_t)c->ping_interval_ms * 1000);
+                break;
+            }
+        }
         if (c->ping_pending) {
             fprintf(stderr, "[wsp] pong timeout on %s:%d, closing\n",
                     c->host, c->port);
@@ -370,6 +409,12 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
             pthread_mutex_unlock(&c->stop_mu);
         } else {
             pthread_mutex_unlock(&c->stop_mu);
+            if (c->hooks && c->hooks->on_error)
+                c->hooks->on_error(in ? (const char *)in : "unknown error",
+                                   c->hook_user);
+            if (c->hooks && c->hooks->on_disconnected)
+                c->hooks->on_disconnected(c->hook_user);
+            c->reconnect_fail_count++;
             schedule_reconnect(c);
         }
         break;
@@ -386,6 +431,9 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
             pthread_mutex_unlock(&c->stop_mu);
         } else {
             pthread_mutex_unlock(&c->stop_mu);
+            if (c->hooks && c->hooks->on_disconnected)
+                c->hooks->on_disconnected(c->hook_user);
+            c->reconnect_fail_count++;
             schedule_reconnect(c);
         }
         break;
@@ -407,6 +455,12 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
             pthread_cond_signal(&c->stop_cond);
         }
         pthread_mutex_unlock(&c->stop_mu);
+        break;
+
+    /* ------------------------------------------------------------------ */
+    case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER:
+        if (c->hooks && c->hooks->on_handshake_header)
+            c->hooks->on_handshake_header(wsi, c->hook_user);
         break;
 
     default:
@@ -602,6 +656,16 @@ void wsp_set_path(wsp_client_t *c, const char *path)
     if (!c || !path) return;
     free(c->path);
     c->path = strdup(path);
+}
+
+void wsp_set_event_hooks(wsp_client_t *c,
+                          const wsl_event_hooks_t *hooks,
+                          void *user)
+{
+    if (c) {
+        c->hooks     = hooks;
+        c->hook_user = user;
+    }
 }
 
 /* ======================================================================
