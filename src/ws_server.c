@@ -186,7 +186,7 @@ void wss_set_conn_cb(wss_server_t *s, wss_conn_cb_t cb, void *user)
 
 int wss_start(wss_server_t *s)
 {
-    s->protocols[0].name                  = s->protocol ? s->protocol : "";
+    s->protocols[0].name                  = s->protocol ? s->protocol : "default";
     s->protocols[0].callback              = server_callback;
     s->protocols[0].per_session_data_size = sizeof(per_session_t);
     s->protocols[0].rx_buffer_size        = 65536;
