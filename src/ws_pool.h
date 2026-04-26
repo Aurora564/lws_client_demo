@@ -35,6 +35,11 @@ extern "C" {
 
 #define WSP_MAX_CLIENTS 256
 
+/* 停止等待超时: wsp_client_stop 等待 CLOSED 回调的最大秒数.
+ * 若服务端因 TCP buffer 残留数据导致 close 帧处理延迟,
+ * 超时后可防止 condvar 永久挂死. */
+#define WSP_STOP_TIMEOUT_SEC 3
+
 typedef struct wsp_pool   wsp_pool_t;
 typedef struct wsp_client wsp_client_t;
 

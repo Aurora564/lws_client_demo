@@ -16,6 +16,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <stdio.h>
 
 /* ---- 编译期常量 ---- */
@@ -741,8 +742,24 @@ void wsp_client_stop(wsp_client_t *c)
     pthread_mutex_lock(&c->stop_mu);
     if (c->wsi && c->pool && c->pool->ctx) {
         lws_cancel_service(c->pool->ctx);
-        while (!c->stopped)
-            pthread_cond_wait(&c->stop_cond, &c->stop_mu);
+        /*
+         * 超时等待: 调用 lws_cancel_service 后, service 线程在
+         * WAIT_CANCELLED 中关闭 wsi, CLOSED 回调 signal condvar.
+         * 但若 TCP buffer 中仍有服务端未消费的数据(如 echo 响应),
+         * 服务端的 close 帧处理可能被延迟, 导致 condvar 长时间不触发.
+         * 超时后可安全退出等待, 后续 lws_context_destroy 会清理残余 wsi.
+         */
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += WSP_STOP_TIMEOUT_SEC;
+        while (!c->stopped) {
+            int rc = pthread_cond_timedwait(&c->stop_cond, &c->stop_mu, &ts);
+            if (rc == ETIMEDOUT) {
+                fprintf(stderr, "[wsp] stop timeout on %s:%d, forcing exit\n",
+                        c->host, c->port);
+                break;
+            }
+        }
         pthread_mutex_unlock(&c->stop_mu);
     } else {
         if (!c->stopped)
