@@ -48,7 +48,7 @@ typedef enum {
 } LwsClientRet_e;
 
 /* 接收回调: data 在回调返回后立即失效, 需要时请自行拷贝 */
-typedef void (*wsl_rx_cb_t)(const char *data, size_t len, void *user);
+typedef void (*wsl_rx_cb_t)(const char *data, size_t len, int is_binary, void *user);
 
 /* 连接事件回调: connected=1 建立, 0 断开 */
 typedef void (*wsl_conn_cb_t)(int connected, void *user);

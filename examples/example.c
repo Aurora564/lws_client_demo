@@ -29,8 +29,9 @@ void signal_handler(int sig) {
 }
 
 /* 接收回调函数 */
-void on_message_received(const char *data, size_t len, void *user) {
+void on_message_received(const char *data, size_t len, int is_binary, void *user) {
     (void)user;  /* 未使用的参数 */
+    (void)is_binary;
     printf("[收到消息] 长度: %zu 字节\n", len);
     if (len > 0) {
         printf("  内容: %.*s\n", (int)len, data);

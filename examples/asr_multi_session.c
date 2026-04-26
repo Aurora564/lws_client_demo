@@ -58,9 +58,10 @@ static asr_system_t g_sys;
 
 /* ==================== ASR 结果回调 ==================== */
 
-static void on_asr_result(const char *data, size_t len, void *user)
+static void on_asr_result(const char *data, size_t len, int is_binary, void *user)
 {
     asr_session_t *s = (asr_session_t *)user;
+    (void)is_binary;
 
     pthread_mutex_lock(&g_sys.lock);
     s->results_recv++;

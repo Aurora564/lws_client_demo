@@ -240,14 +240,15 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
 
         if (first && final && remain == 0) {
             if (c->rx_cb)
-                c->rx_cb((const char *)in, len, c->user);
+                c->rx_cb((const char *)in, len, lws_frame_is_binary(wsi), c->user);
         } else {
             if (first) c->frag_len = 0;
             if (frag_append(c, (const unsigned char *)in, len) < 0)
                 return -1;
             if (final && remain == 0) {
                 if (c->rx_cb)
-                    c->rx_cb((const char *)c->frag_buf, c->frag_len, c->user);
+                    c->rx_cb((const char *)c->frag_buf, c->frag_len,
+                             lws_frame_is_binary(wsi), c->user);
                 c->frag_len = 0;
             }
         }

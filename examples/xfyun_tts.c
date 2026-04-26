@@ -262,9 +262,10 @@ static int json_get_str(const char *json, const char *key,
 
 /* ==================== 接收回调（在 service 线程中调用）==================== */
 
-static void on_tts_message(const char *data, size_t len, void *user)
+static void on_tts_message(const char *data, size_t len, int is_binary, void *user)
 {
     tts_ctx_t *ctx = (tts_ctx_t *)user;
+    (void)is_binary;
 
     /* 拷贝一份保证 '\0' 结尾 */
     char *json = malloc(len + 1);

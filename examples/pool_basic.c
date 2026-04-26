@@ -27,9 +27,10 @@ static volatile int g_running = 1;
 
 static void on_signal(int sig) { (void)sig; g_running = 0; }
 
-static void on_message(const char *data, size_t len, void *user)
+static void on_message(const char *data, size_t len, int is_binary, void *user)
 {
     (void)user;
+    (void)is_binary;
     printf("[recv] %.*s\n", (int)len, data);
 }
 

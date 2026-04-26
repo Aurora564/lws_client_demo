@@ -35,9 +35,10 @@ typedef struct {
     int  recv_count;
 } client_ctx_t;
 
-static void on_message(const char *data, size_t len, void *user)
+static void on_message(const char *data, size_t len, int is_binary, void *user)
 {
     client_ctx_t *ctx = (client_ctx_t *)user;
+    (void)is_binary;
     ctx->recv_count++;
     printf("[recv] client%-2d (%-8s) #%-3d  %.*s\n",
            ctx->id, ctx->name, ctx->recv_count, (int)len, data);

@@ -267,7 +267,8 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
         if (is_first && is_final && remaining == 0) {
             /* 单帧完整消息, 直接回调 */
             if (c->rx_cb)
-                c->rx_cb((const char *)in, len, c->rx_user);
+                c->rx_cb((const char *)in, len, lws_frame_is_binary(wsi),
+                         c->rx_user);
             /* 事件钩子: 消息通知 (单帧) */
             if (c->hooks && c->hooks->on_message)
                 c->hooks->on_message((const char *)in, len,
@@ -280,7 +281,7 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
                 /* 最后一块, 整体回调 */
                 if (c->rx_cb && c->frag.len > 0)
                     c->rx_cb((const char *)c->frag.buf, c->frag.len,
-                             c->rx_user);
+                             lws_frame_is_binary(wsi), c->rx_user);
                 /* 事件钩子: 消息通知 (分片重组后) */
                 if (c->hooks && c->hooks->on_message && c->frag.len > 0)
                     c->hooks->on_message((const char *)c->frag.buf,

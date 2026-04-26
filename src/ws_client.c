@@ -182,7 +182,7 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
 
         if (first && final && remaining == 0) {
             if (c->rx_cb)
-                c->rx_cb((const char *)in, len, c->user);
+                c->rx_cb((const char *)in, len, lws_frame_is_binary(wsi), c->user);
         } else {
             if (first)
                 c->frag_len = 0;
@@ -190,7 +190,8 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
                 return -1;
             if (final && remaining == 0) {
                 if (c->rx_cb)
-                    c->rx_cb((const char *)c->frag_buf, c->frag_len, c->user);
+                    c->rx_cb((const char *)c->frag_buf, c->frag_len,
+                             lws_frame_is_binary(wsi), c->user);
                 c->frag_len = 0;
             }
         }
