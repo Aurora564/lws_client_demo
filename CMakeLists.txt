@@ -38,7 +38,7 @@ find_package(Threads REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(ZLIB REQUIRED)
 
-# ==================== 编译 wsclient 静态库 ====================
+# ==================== 编译 wsclient (v1) 静态库 ====================
 add_library(wsclient STATIC
     ${SRC_DIR}/ws_client.c
 )
@@ -63,13 +63,85 @@ set_target_properties(wsclient PROPERTIES
     ARCHIVE_OUTPUT_DIRECTORY ${BUILD_APP_DIR}
 )
 
+# ==================== 编译 wsclientv2 静态库 ====================
+add_library(wsclientv2 STATIC
+    ${SRC_DIR}/ws_client_v2.c
+)
+
+target_include_directories(wsclientv2 PUBLIC
+    ${LWS_INCLUDE_DIR}
+    ${LWS_INCLUDE_DIR}/libwebsockets
+    ${SRC_DIR}
+)
+
+target_link_libraries(wsclientv2 PUBLIC
+    ${LWS_LIBRARY}
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ZLIB::ZLIB
+    m
+)
+
+set_target_properties(wsclientv2 PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${BUILD_APP_DIR}
+)
+
+# ==================== 编译 wspoolclient 静态库 ====================
+add_library(wspoolclient STATIC
+    ${SRC_DIR}/ws_pool.c
+)
+
+target_include_directories(wspoolclient PUBLIC
+    ${LWS_INCLUDE_DIR}
+    ${LWS_INCLUDE_DIR}/libwebsockets
+    ${SRC_DIR}
+)
+
+target_link_libraries(wspoolclient PUBLIC
+    ${LWS_LIBRARY}
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ZLIB::ZLIB
+    m
+)
+
+set_target_properties(wspoolclient PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${BUILD_APP_DIR}
+)
+
+# ==================== 编译 wsserver 静态库 ====================
+add_library(wsserver STATIC
+    ${SRC_DIR}/ws_server.c
+)
+
+target_include_directories(wsserver PUBLIC
+    ${LWS_INCLUDE_DIR}
+    ${LWS_INCLUDE_DIR}/libwebsockets
+    ${SRC_DIR}
+)
+
+target_link_libraries(wsserver PUBLIC
+    ${LWS_LIBRARY}
+    Threads::Threads
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    ZLIB::ZLIB
+    m
+)
+
+set_target_properties(wsserver PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${BUILD_APP_DIR}
+)
+
 # ==================== 编译示例程序（可选）====================
 option(BUILD_EXAMPLES "Build example programs" ON)
 
 if(BUILD_EXAMPLES)
     set(EXAMPLES_DIR ${CMAKE_SOURCE_DIR}/examples)
 
-    # 辅助函数：为每个示例创建编译目标
+    # ws_client (1:1) 示例
     function(add_example name)
         add_executable(${name} ${EXAMPLES_DIR}/${name}.c)
         target_include_directories(${name} PRIVATE ${SRC_DIR})
@@ -81,8 +153,51 @@ if(BUILD_EXAMPLES)
         )
     endfunction()
 
+    # ws_client v2 (1:1) 示例
+    function(add_v2_example name)
+        add_executable(${name} ${EXAMPLES_DIR}/${name}.c)
+        target_include_directories(${name} PRIVATE ${SRC_DIR})
+        target_link_libraries(${name} PRIVATE wsclientv2)
+        set_target_properties(${name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${BUILD_APP_DIR}
+            INSTALL_RPATH "${LWS_LIB_DIR}"
+            BUILD_WITH_INSTALL_RPATH TRUE
+        )
+    endfunction()
+
+    # ws_pool (1:N) 示例
+    function(add_pool_example name)
+        add_executable(${name} ${EXAMPLES_DIR}/${name}.c)
+        target_include_directories(${name} PRIVATE ${SRC_DIR})
+        target_link_libraries(${name} PRIVATE wspoolclient)
+        set_target_properties(${name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${BUILD_APP_DIR}
+            INSTALL_RPATH "${LWS_LIB_DIR}"
+            BUILD_WITH_INSTALL_RPATH TRUE
+        )
+    endfunction()
+
+    # echo_server（测试用服务器）
+    function(add_server_example name)
+        add_executable(${name} ${EXAMPLES_DIR}/${name}.c)
+        target_include_directories(${name} PRIVATE ${SRC_DIR})
+        target_link_libraries(${name} PRIVATE wsserver)
+        set_target_properties(${name} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${BUILD_APP_DIR}
+            INSTALL_RPATH "${LWS_LIB_DIR}"
+            BUILD_WITH_INSTALL_RPATH TRUE
+        )
+    endfunction()
+
     add_example(example)
     add_example(asr_multi_session)
+
+    add_pool_example(pool_basic)
+    add_pool_example(pool_multi_client)
+    add_pool_example(pool_asr_sessions)
+    add_pool_example(xfyun_tts)
+
+    add_server_example(echo_server)
 endif()
 
 # ==================== 安装规则 ====================
