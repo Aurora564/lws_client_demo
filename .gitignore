@@ -1,6 +1,8 @@
 # 构建产物
 build/
 output/
+build.log
+demo.pcm
 example
 *.o
 *.a
