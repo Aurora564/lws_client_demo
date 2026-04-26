@@ -4,8 +4,9 @@
  * 线程安全约定:
  *   - pool->pool_lock  保护 clients[], n_clients, pending[], n_pending
  *   - client->q_lock   保护每个客户端的发送队列
- *   - client->stop_mu  保护 stopped 标志 + condvar
- *   - wsi / state / sul 仅在 service 线程内访问, 无需额外锁
+ *   - client->stop_mu  保护 wsi / stopping / stopped + stop_cond
+ *                       (wsi 同时被 service 线程和 stop 线程读写)
+ *   - state / sul 仅在 service 线程内访问, 无需额外锁
  */
 
 #include "ws_pool.h"
@@ -326,6 +327,13 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
 
         for (int i = 0; i < nc; i++) {
             wsp_client_t *cc = snap[i];
+            if (cc->stopping && cc->wsi) {
+                /* 发起关闭, CLOSED 中 signal stop_cond */
+                lws_close_reason(cc->wsi, LWS_CLOSE_STATUS_NORMAL,
+                                 NULL, 0);
+                lws_callback_on_writable(cc->wsi);
+                continue;
+            }
             if (cc->state != STATE_CONNECTED || !cc->wsi) continue;
             pthread_mutex_lock(&cc->q_lock);
             int has = (cc->q_head != NULL);
@@ -361,14 +369,14 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
         if (!c) break;
         fprintf(stderr, "[wsp] connection error %s:%d: %s\n",
                 c->host, c->port, in ? (const char *)in : "(none)");
+        pthread_mutex_lock(&c->stop_mu);
         c->wsi = NULL;
         if (c->stopping) {
-            /* 不重连, 直接标记 stopped */
-            pthread_mutex_lock(&c->stop_mu);
             c->stopped = 1;
             pthread_cond_signal(&c->stop_cond);
             pthread_mutex_unlock(&c->stop_mu);
         } else {
+            pthread_mutex_unlock(&c->stop_mu);
             schedule_reconnect(c);
         }
         break;
@@ -376,14 +384,15 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
     /* ------------------------------------------------------------------ */
     case LWS_CALLBACK_CLIENT_CLOSED:
         if (!c) break;
+        pthread_mutex_lock(&c->stop_mu);
         c->wsi   = NULL;
         c->state = STATE_IDLE;
         if (c->stopping) {
-            pthread_mutex_lock(&c->stop_mu);
             c->stopped = 1;
             pthread_cond_signal(&c->stop_cond);
             pthread_mutex_unlock(&c->stop_mu);
         } else {
+            pthread_mutex_unlock(&c->stop_mu);
             schedule_reconnect(c);
         }
         break;
@@ -636,22 +645,32 @@ void wsp_client_stop(wsp_client_t *c)
     if (c->pool && c->pool->ctx)
         lws_sul_cancel(&c->sul);
 
-    /* 若当前有 wsi, 通过 lws_cancel_service 唤醒 service 线程,
-     * service 线程在 CANCELLED 中检测到 stopping, 会关闭 wsi,
-     * CLOSED 回调负责 signal stop_cond.
-     * 若 wsi 为 NULL (尚未连接 / 重连等待中), 直接标记 stopped. */
+    /* 加锁读取 wsi: service 线程在 CLOSED/CONNECTION_ERROR 中
+     * 持有 stop_mu 写入 wsi, 确保读取不构成 data race.
+     * lws_cancel_service 在锁内调用, 随后 condvar wait 原子释放锁,
+     * 消除 lost wakeup 窗口:
+     *   stop 线程                  service 线程 (CLOSED)
+     *   ───────────                ───────────────────
+     *   lock(stop_mu)
+     *   read wsi (non-NULL)
+     *   lws_cancel_service()
+     *   pthread_cond_wait()        lock(stop_mu)  ← wait 已释放锁
+     *   (atomically unlocks)       wsi = NULL
+     *                              stopped = 1
+     *                              signal(stop_cond)
+     *                              unlock(stop_mu)
+     *   wait returns (locked)
+     *   stopped == true → exit
+     *   unlock(stop_mu) */
     pthread_mutex_lock(&c->stop_mu);
-    if (!c->wsi && !c->stopped) {
-        c->stopped = 1;
-    }
-    pthread_mutex_unlock(&c->stop_mu);
-
     if (c->wsi && c->pool && c->pool->ctx) {
         lws_cancel_service(c->pool->ctx);
-        /* 等待 CLOSED 回调 signal */
-        pthread_mutex_lock(&c->stop_mu);
         while (!c->stopped)
             pthread_cond_wait(&c->stop_cond, &c->stop_mu);
+        pthread_mutex_unlock(&c->stop_mu);
+    } else {
+        if (!c->stopped)
+            c->stopped = 1;
         pthread_mutex_unlock(&c->stop_mu);
     }
 
