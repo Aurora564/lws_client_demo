@@ -281,6 +281,17 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
             schedule_reconnect(c);
         break;
 
+    /*
+     * LWS_CALLBACK_WSI_DESTROY:
+     * lws_context_destroy may bypass CLOSED/CONNECTION_ERROR and
+     * trigger WSI_DESTROY directly, leaving c->wsi as a dangling pointer.
+     * Defensive zeroing to prevent use of destroyed wsi.
+     */
+    case LWS_CALLBACK_WSI_DESTROY:
+        if (c->wsi == wsi)
+            c->wsi = NULL;
+        break;
+
     default:
         break;
     }

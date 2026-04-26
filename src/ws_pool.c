@@ -397,6 +397,25 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
         }
         break;
 
+    /*
+     * LWS_CALLBACK_WSI_DESTROY:
+     * lws_context_destroy may bypass CLOSED/CONNECTION_ERROR and
+     * trigger WSI_DESTROY directly, leaving c->wsi as a dangling pointer.
+     * Defensive zeroing under stop_mu (consistent with Fix3 convention).
+     * Signal waiting stop thread if stopping.
+     */
+    case LWS_CALLBACK_WSI_DESTROY:
+        if (!c) break;
+        pthread_mutex_lock(&c->stop_mu);
+        if (c->wsi == wsi)
+            c->wsi = NULL;
+        if (c->stopping && !c->stopped) {
+            c->stopped = 1;
+            pthread_cond_signal(&c->stop_cond);
+        }
+        pthread_mutex_unlock(&c->stop_mu);
+        break;
+
     default:
         break;
     }
