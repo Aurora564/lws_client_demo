@@ -288,8 +288,9 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
 
         int write_type = n->is_binary ? LWS_WRITE_BINARY : LWS_WRITE_TEXT;
         int nwritten = lws_write(wsi, n->buf + LWS_PRE, n->len, write_type);
-        (void)nwritten;
         free(n);
+        if (nwritten < 0)
+            return -1;
 
         /* 队列还有剩余数据, 继续请求可写 */
         if (c->q_head)

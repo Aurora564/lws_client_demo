@@ -225,10 +225,12 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
         pthread_mutex_unlock(&c->q_lock);
 
         if (node) {
-            lws_write(wsi, node->buf + LWS_PRE, node->len,
-                      node->is_binary ? LWS_WRITE_BINARY : LWS_WRITE_TEXT);
+            int n = lws_write(wsi, node->buf + LWS_PRE, node->len,
+                              node->is_binary ? LWS_WRITE_BINARY : LWS_WRITE_TEXT);
             free(node->buf);
             free(node);
+            if (n < 0)
+                return -1;
             if (more)
                 lws_callback_on_writable(wsi);
         }
