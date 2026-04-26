@@ -10,6 +10,7 @@
  */
 
 #include "ws_pool.h"
+#include "ws_internal.h"
 
 #include <libwebsockets.h>
 #include <pthread.h>
@@ -26,13 +27,6 @@
 #define SERVICE_POLL_MS            50
 
 /* ---- 内部类型 ---- */
-
-typedef struct msg_node {
-    unsigned char   *buf;       /* LWS_PRE + payload 连续分配 */
-    size_t           len;
-    int              is_binary;
-    struct msg_node *next;
-} msg_node_t;
 
 typedef enum {
     STATE_IDLE,
@@ -74,8 +68,8 @@ struct wsp_client {
 
     /* 发送队列 */
     pthread_mutex_t  q_lock;
-    msg_node_t      *q_head;
-    msg_node_t      *q_tail;
+    ws_msg_node_t   *q_head;
+    ws_msg_node_t   *q_tail;
     size_t           q_msgs;
     size_t           q_bytes;
 
@@ -136,10 +130,9 @@ static int frag_append(wsp_client_t *c, const unsigned char *data, size_t len)
 
 static void flush_queue_locked(wsp_client_t *c)
 {
-    msg_node_t *n = c->q_head;
+    ws_msg_node_t *n = c->q_head;
     while (n) {
-        msg_node_t *next = n->next;
-        free(n->buf);
+        ws_msg_node_t *next = n->next;
         free(n);
         n = next;
     }
@@ -272,7 +265,7 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
         }
 
         pthread_mutex_lock(&c->q_lock);
-        msg_node_t *node = c->q_head;
+        ws_msg_node_t *node = c->q_head;
         if (node) {
             c->q_head = node->next;
             if (!c->q_head) c->q_tail = NULL;
@@ -285,7 +278,6 @@ static int ws_pool_callback(struct lws *wsi, enum lws_callback_reasons reason,
         if (node) {
             int n = lws_write(wsi, node->buf + LWS_PRE, node->len,
                               node->is_binary ? LWS_WRITE_BINARY : LWS_WRITE_TEXT);
-            free(node->buf);
             free(node);
             if (n < 0)
                 return -1;
@@ -728,22 +720,13 @@ static LwsClientRet_e enqueue(wsp_client_t *c, const void *data, size_t len, int
 {
     if (!c || !data) return LWS_ERR_PARAM;
 
-    msg_node_t *node = malloc(sizeof(*node));
+    ws_msg_node_t *node = ws_msg_new(data, len, is_binary, LWS_PRE);
     if (!node) return LWS_ERR_QUEUE_FULL;
-
-    node->buf = malloc(LWS_PRE + len);
-    if (!node->buf) { free(node); return LWS_ERR_QUEUE_FULL; }
-
-    memcpy(node->buf + LWS_PRE, data, len);
-    node->len       = len;
-    node->is_binary = is_binary;
-    node->next      = NULL;
 
     pthread_mutex_lock(&c->q_lock);
 
     if (c->stopping) {
         pthread_mutex_unlock(&c->q_lock);
-        free(node->buf);
         free(node);
         return LWS_ERR_PARAM;
     }
@@ -751,7 +734,6 @@ static LwsClientRet_e enqueue(wsp_client_t *c, const void *data, size_t len, int
     if ((c->max_queue_msgs  && c->q_msgs >= c->max_queue_msgs) ||
         (c->max_queue_bytes && c->q_bytes + len > c->max_queue_bytes)) {
         pthread_mutex_unlock(&c->q_lock);
-        free(node->buf);
         free(node);
         return LWS_ERR_QUEUE_FULL;
     }
