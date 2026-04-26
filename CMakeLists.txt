@@ -197,6 +197,8 @@ if(BUILD_EXAMPLES)
     add_pool_example(pool_asr_sessions)
     add_pool_example(xfyun_tts)
 
+    add_v2_example(v2_hooks_demo)
+
     add_server_example(echo_server)
 endif()
 

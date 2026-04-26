@@ -34,6 +34,8 @@
 #include <string.h>
 #include <stddef.h>
 
+struct lws;  /* 前置声明, 用于钩子回调签名 */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -53,6 +55,37 @@ typedef void (*wsl_conn_cb_t)(int connected, void *user);
 
 /* 错误回调: error 字符串仅在该次调用内有效 */
 typedef void (*wsl_err_cb_t)(const char *error, void *user);
+
+/* ---- v2 事件钩子 ---- */
+
+/*
+ * wsl_event_hooks_t - 事件钩子表, 将回调与业务逻辑解耦
+ *
+ * 所有钩子均为可选, NULL 表示不使用.
+ * 各钩子在 service 线程中同步调用, 不应执行耗时操作.
+ *
+ * on_connected:         连接建立后调用
+ * on_disconnected:      连接断开后调用 (重连前)
+ * on_error:             连接错误时调用
+ * on_message:           收到完整消息后调用, is_binary 标识帧类型
+ * on_heartbeat_tick:    心跳定时器触发, 返回非 0 由业务层自行处理, 返回 0 走默认 ping/pong
+ * on_reconnect_decision:重连决策, fail_count 当前连续失败次数,
+ *                       current_delay_ms 为默认退避延迟;
+ *                       返回 -1 停止重连, 返回 >=0 使用该值作为下次重连延迟
+ * on_handshake_header:  WebSocket 握手阶段, 可用于添加自定义 HTTP 头
+ */
+typedef struct {
+    void (*on_connected)(void *user);
+    void (*on_disconnected)(void *user);
+    void (*on_error)(const char *msg, void *user);
+    void (*on_message)(const char *data, size_t len,
+                       int is_binary, void *user);
+    int  (*on_heartbeat_tick)(void *user);
+    int  (*on_reconnect_decision)(int fail_count,
+                                  int current_delay_ms,
+                                  void *user);
+    void (*on_handshake_header)(struct lws *wsi, void *user);
+} wsl_event_hooks_t;
 
 typedef struct wsl_client wsl_client_t;
 
@@ -132,6 +165,19 @@ void wsl_set_conn_cb(wsl_client_t *c, wsl_conn_cb_t cb, void *user);
  * 当 CONNECTION_ERROR 发生时调用, 包含服务端返回的错误描述
  */
 void wsl_set_err_cb(wsl_client_t *c, wsl_err_cb_t cb, void *user);
+
+/*
+ * wsl_set_event_hooks - 设置事件钩子表 (须在 wsl_start 前调用)
+ *
+ * hooks:  事件钩子表, 为 NULL 或各字段为 NULL 表示不使用对应钩子.
+ *         hooks 指向的内存必须在 wsl_start 之后保持有效.
+ * user:   透传给各钩子回调的用户指针
+ *
+ * 与 wsl_set_conn_cb / wsl_set_err_cb 兼容, 二者同时在对应时机触发.
+ */
+void wsl_set_event_hooks(wsl_client_t *c,
+                         const wsl_event_hooks_t *hooks,
+                         void *user);
 
 /* ---------------------------------------------------------------- */
 

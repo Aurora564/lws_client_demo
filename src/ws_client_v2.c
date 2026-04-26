@@ -35,6 +35,7 @@ enum wsl_state {
     STATE_CONNECTING,
     STATE_CONNECTED,
     STATE_RECONNECT_WAIT,
+    STATE_STOPPED,          /* 钩子 on_reconnect_decision 要求停止重连 */
 };
 
 /* ====================================================================
@@ -52,6 +53,13 @@ struct wsl_client {
     void          *conn_user;
     wsl_err_cb_t   err_cb;
     void          *err_user;
+
+    /* ---- 事件钩子 ---- */
+    const wsl_event_hooks_t *hooks;
+    void                    *hook_user;
+
+    /* ---- 运行时统计 ---- */
+    int            reconnect_fail_count;
 
     /* ---- 运行时参数 ---- */
     int            use_ssl;
@@ -121,6 +129,19 @@ static void schedule_reconnect(wsl_client_t *c)
         if (delay > c->reconnect_max_ms)
             delay = c->reconnect_max_ms;
     }
+
+    /* 事件钩子: 允许业务层覆盖重连决策 */
+    if (c->hooks && c->hooks->on_reconnect_decision) {
+        int ret = c->hooks->on_reconnect_decision(
+                    c->reconnect_fail_count, delay, c->hook_user);
+        if (ret < 0) {
+            /* 业务层要求停止重连 */
+            c->state = STATE_STOPPED;
+            return;
+        }
+        delay = ret;  /* 业务层自定义延迟, 覆盖默认退避 */
+    }
+
     c->reconnect_delay_ms = delay;
     c->state = STATE_RECONNECT_WAIT;
 
@@ -154,7 +175,6 @@ static int do_connect(wsl_client_t *c)
     info.path      = c->path ? c->path : "/";
     info.host      = c->host;
     info.origin    = c->host;
-    info.method    = "GET";
     info.pwsi      = &c->wsi;
 
     /* SSL 配置 */
@@ -218,6 +238,7 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
         c->state = STATE_CONNECTED;
         c->reconnect_delay_ms = c->reconnect_init_ms;
         c->ping_pending = 0;
+        c->reconnect_fail_count = 0;  /* 重置重连计数 */
 
         /* 启动心跳定时器 (间隔 ms 转为 us) */
         if (c->ping_interval_ms > 0)
@@ -227,6 +248,10 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
         /* 连接事件回调 */
         if (c->conn_cb)
             c->conn_cb(1, c->conn_user);
+
+        /* 事件钩子: 连接建立通知 */
+        if (c->hooks && c->hooks->on_connected)
+            c->hooks->on_connected(c->hook_user);
 
         /* 队列中有积压数据, 触发可写 */
         if (c->q_head)
@@ -243,6 +268,10 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
             /* 单帧完整消息, 直接回调 */
             if (c->rx_cb)
                 c->rx_cb((const char *)in, len, c->rx_user);
+            /* 事件钩子: 消息通知 (单帧) */
+            if (c->hooks && c->hooks->on_message)
+                c->hooks->on_message((const char *)in, len,
+                                     lws_frame_is_binary(wsi), c->hook_user);
         } else {
             /* 多帧分片: 追加至缓冲 */
             if (ws_frag_append(&c->frag, (const unsigned char *)in, len) < 0)
@@ -252,6 +281,12 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
                 if (c->rx_cb && c->frag.len > 0)
                     c->rx_cb((const char *)c->frag.buf, c->frag.len,
                              c->rx_user);
+                /* 事件钩子: 消息通知 (分片重组后) */
+                if (c->hooks && c->hooks->on_message && c->frag.len > 0)
+                    c->hooks->on_message((const char *)c->frag.buf,
+                                         c->frag.len,
+                                         lws_frame_is_binary(wsi),
+                                         c->hook_user);
                 c->frag.len = 0;
             }
         }
@@ -300,6 +335,17 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
 
     /* ---- 心跳: TIMER 触发 ---- */
     case LWS_CALLBACK_TIMER:
+        /* 事件钩子: 自定义心跳, 返回非 0 表示业务层自行处理心跳 */
+        if (c->hooks && c->hooks->on_heartbeat_tick) {
+            if (c->hooks->on_heartbeat_tick(c->hook_user)) {
+                /* 业务层已处理心跳, 重置定时器 (pong 回调不会触发) */
+                if (c->ping_interval_ms > 0 && c->wsi)
+                    lws_set_timer_usecs(c->wsi,
+                                        (lws_usec_t)c->ping_interval_ms * 1000);
+                break;
+            }
+            /* 返回 0: 走默认 ping/pong 逻辑 */
+        }
         if (c->ping_pending) {
             /* 上次 ping 未收到 pong, 超时关闭连接 */
             return -1;
@@ -327,9 +373,17 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
             if (c->err_cb)
                 c->err_cb((const char *)(in ? in : "unknown error"),
                           c->err_user);
+            /* 事件钩子: 连接错误通知 */
+            if (c->hooks && c->hooks->on_error)
+                c->hooks->on_error((const char *)(in ? in : "unknown error"),
+                                   c->hook_user);
             /* 断开回调 */
             if (c->conn_cb)
                 c->conn_cb(0, c->conn_user);
+            /* 事件钩子: 断开通知 */
+            if (c->hooks && c->hooks->on_disconnected)
+                c->hooks->on_disconnected(c->hook_user);
+            c->reconnect_fail_count++;
             schedule_reconnect(c);
         }
         break;
@@ -342,8 +396,18 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
         if (!c->stopping) {
             if (c->conn_cb)
                 c->conn_cb(0, c->conn_user);
+            /* 事件钩子: 断开通知 */
+            if (c->hooks && c->hooks->on_disconnected)
+                c->hooks->on_disconnected(c->hook_user);
+            c->reconnect_fail_count++;
             schedule_reconnect(c);
         }
+        break;
+
+    /* ---- 握手阶段: 添加自定义 HTTP 头 ---- */
+    case LWS_CALLBACK_CLIENT_APPEND_HANDSHAKE_HEADER:
+        if (c->hooks && c->hooks->on_handshake_header)
+            c->hooks->on_handshake_header(wsi, c->hook_user);
         break;
 
     /*
@@ -540,6 +604,17 @@ void wsl_set_err_cb(wsl_client_t *c, wsl_err_cb_t cb, void *user)
     if (c) {
         c->err_cb   = cb;
         c->err_user = user;
+    }
+}
+
+/* ---- 事件钩子 ---- */
+void wsl_set_event_hooks(wsl_client_t *c,
+                         const wsl_event_hooks_t *hooks,
+                         void *user)
+{
+    if (c) {
+        c->hooks     = hooks;
+        c->hook_user = user;
     }
 }
 
