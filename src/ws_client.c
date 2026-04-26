@@ -32,13 +32,13 @@ typedef enum {
     STATE_RECONNECT_WAIT,
 } client_state_t;
 
-struct wsl_client {
-    /* -- 配置 （wsl_start 前只读）-- */
+struct wsld_client {
+    /* -- 配置 （wsld_start 前只读）-- */
     char        *host;
     int          port;
     char        *proto_name;
     char        *path;          /* WebSocket 路径 */
-    wsl_rx_cb_t  rx_cb;
+    wsld_rx_cb_t  rx_cb;
     void        *user;
 
     int          use_ssl;       /* 1 = WSS, 0 = WS */
@@ -95,7 +95,7 @@ static long ms_now(void)
 
 
 /* 按当前的 reconnect_delay_ms 设置 reconnect_at, 并对 delay 做指数退避 */
-static void schedule_reconnect(wsl_client_t *c)
+static void schedule_reconnect(wsld_client_t *c)
 {
     long at = ms_now() + c->reconnect_delay_ms;
     c->reconnect_at.tv_sec = at / 1000L;
@@ -112,7 +112,7 @@ static void schedule_reconnect(wsl_client_t *c)
 
 
 /* 向分片缓冲区添加数据， OOM 返回 -1 */
-static int frag_append(wsl_client_t *c, const unsigned char *data, size_t len)
+static int frag_append(wsld_client_t *c, const unsigned char *data, size_t len)
 {
     if (c->frag_len + len > c->frag_cap)
     {
@@ -134,7 +134,7 @@ static int frag_append(wsl_client_t *c, const unsigned char *data, size_t len)
 
 
 /* 清空队列节点，调用者必须持有 q_lock */
-static void flush_queue_locked(wsl_client_t *c)
+static void flush_queue_locked(wsld_client_t *c)
 {
     msg_node_t *n = c->q_head;
     while (n)
@@ -159,7 +159,7 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
     /* 部分 reason 会以 NULL wsi 进入， 提前预防 */
     if (!wsi) return 0;
 
-    wsl_client_t *c = lws_context_user(lws_get_context(wsi));
+    wsld_client_t *c = lws_context_user(lws_get_context(wsi));
     if (!c) return 0;
 
     switch (reason){
@@ -302,7 +302,7 @@ static int ws_callback(struct lws *wsi, enum lws_callback_reasons reason,
 
 /* -------------------------发起连接------------------------------- */
 
-static void do_connect(wsl_client_t *c)
+static void do_connect(wsld_client_t *c)
 {
     struct lws_client_connect_info info;
     memset(&info, 0, sizeof(info));
@@ -341,7 +341,7 @@ static void do_connect(wsl_client_t *c)
 
 static void *service_thread(void *arg)
 {
-    wsl_client_t *c = arg;
+    wsld_client_t *c = arg;
     do_connect(c);
 
     while (!c->stopping) {
@@ -363,13 +363,13 @@ static void *service_thread(void *arg)
 
 /* -------------------------公开 API------------------------------- */
 
-wsl_client_t *wsl_create(const char *host, int port,
+wsld_client_t *wsld_create(const char *host, int port,
                             const char *protocol,
-                            wsl_rx_cb_t rx_cb, void *user)
+                            wsld_rx_cb_t rx_cb, void *user)
 {
     if (!host || port <= 0) return NULL;
 
-    wsl_client_t *c = calloc(1, sizeof(*c));
+    wsld_client_t *c = calloc(1, sizeof(*c));
     if (!c) return NULL;
 
     pthread_mutex_init(&c->q_lock, NULL);
@@ -378,7 +378,7 @@ wsl_client_t *wsl_create(const char *host, int port,
     c->proto_name = strdup(protocol ? protocol : "");
     c->path = strdup("/");  /* 默认路径 */
     if (!c->host || !c->proto_name || !c->path) {
-        wsl_destroy(c);
+        wsld_destroy(c);
         return NULL;
     }
 
@@ -403,14 +403,14 @@ wsl_client_t *wsl_create(const char *host, int port,
     return c;
 }
 
-void wsl_set_ping(wsl_client_t *c, int interval_ms, int pong_timeout_ms)
+void wsld_set_ping(wsld_client_t *c, int interval_ms, int pong_timeout_ms)
 {
     if (!c) return;
     c->ping_interval_ms = interval_ms;
     c->pong_timeout_ms = pong_timeout_ms;
 }
 
-void wsl_set_reconnect(wsl_client_t *c, int init_ms, int max_ms)
+void wsld_set_reconnect(wsld_client_t *c, int init_ms, int max_ms)
 {
     if (!c) return;
     c->reconnect_init_ms = init_ms;
@@ -418,28 +418,28 @@ void wsl_set_reconnect(wsl_client_t *c, int init_ms, int max_ms)
     c->reconnect_delay_ms = init_ms;
 }
 
-void wsl_set_queue_limit(wsl_client_t *c, int max_msgs, int max_bytes)
+void wsld_set_queue_limit(wsld_client_t *c, int max_msgs, int max_bytes)
 {
     if (!c) return;
     c->max_queue_msgs = max_msgs;
     c->max_queue_bytes = max_bytes;
 }
 
-void wsl_set_ssl(wsl_client_t *c, int enabled, int skip_verify)
+void wsld_set_ssl(wsld_client_t *c, int enabled, int skip_verify)
 {
     if (!c) return;
     c->use_ssl = enabled ? 1 : 0;
     c->ssl_skip_verify = skip_verify ? 1 : 0;
 }
 
-void wsl_set_path(wsl_client_t *c, const char *path)
+void wsld_set_path(wsld_client_t *c, const char *path)
 {
     if (!c || !path) return;
     free(c->path);
     c->path = strdup(path);
 }
 
-int wsl_start(wsl_client_t *c)
+int wsld_start(wsld_client_t *c)
 {
     if (!c) return 0;
 
@@ -465,7 +465,7 @@ int wsl_start(wsl_client_t *c)
     return 1;
 }
 
-void wsl_stop(wsl_client_t *c)
+void wsld_stop(wsld_client_t *c)
 {
     if (!c || !c->thread_started || c->stopping) return;
 
@@ -483,7 +483,7 @@ void wsl_stop(wsl_client_t *c)
     }
 }
 
-void wsl_destroy(wsl_client_t *c)
+void wsld_destroy(wsld_client_t *c)
 {
     if (!c) return;
 
@@ -504,7 +504,7 @@ void wsl_destroy(wsl_client_t *c)
 }
 
 /* -- 内部入队 -- */
-static LwsClientRet_e enqueue(wsl_client_t *c, const void *data, size_t len, int is_binary)
+static LwsClientRet_e enqueue(wsld_client_t *c, const void *data, size_t len, int is_binary)
 {
     if (!c || !data) return LWS_ERR_PARAM;
 
@@ -540,12 +540,12 @@ static LwsClientRet_e enqueue(wsl_client_t *c, const void *data, size_t len, int
     return LWS_OK;
 }
 
-LwsClientRet_e wsl_send(wsl_client_t *c, const char *data, size_t len)
+LwsClientRet_e wsld_send(wsld_client_t *c, const char *data, size_t len)
 {
     return enqueue(c, data, len, 0);
 }
 
-LwsClientRet_e wsl_send_binary(wsl_client_t *c, const void *data, size_t len)
+LwsClientRet_e wsld_send_binary(wsld_client_t *c, const void *data, size_t len)
 {
     return enqueue(c, data, len, 1);
 }

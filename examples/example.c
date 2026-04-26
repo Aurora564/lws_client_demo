@@ -105,7 +105,7 @@ int main(int argc, char *argv[]) {
     signal(SIGTERM, signal_handler);
 
     /* 1. 创建客户端实例 */
-    wsl_client_t *client = wsl_create(host, port, protocol, on_message_received, NULL);
+    wsld_client_t *client = wsld_create(host, port, protocol, on_message_received, NULL);
     if (!client) {
         fprintf(stderr, "错误: 创建客户端失败\n");
         return 1;
@@ -113,23 +113,23 @@ int main(int argc, char *argv[]) {
 
     /* 2. 配置 SSL/TLS（如果启用）*/
     if (use_ssl) {
-        wsl_set_ssl(client, 1, skip_verify);
+        wsld_set_ssl(client, 1, skip_verify);
     }
 
     /* 3. 配置自定义路径（如果不是默认值）*/
     if (strcmp(path, "/") != 0) {
-        wsl_set_path(client, path);
+        wsld_set_path(client, path);
     }
 
     /* 4. 配置心跳和重连参数（可选）*/
-    wsl_set_ping(client, 30000, 10000);           // 30秒心跳，10秒超时
-    wsl_set_reconnect(client, 1000, 60000);       // 初始重连1秒，最大60秒
-    wsl_set_queue_limit(client, 100, 1024 * 1024); // 最多100条消息或1MB
+    wsld_set_ping(client, 30000, 10000);           // 30秒心跳，10秒超时
+    wsld_set_reconnect(client, 1000, 60000);       // 初始重连1秒，最大60秒
+    wsld_set_queue_limit(client, 100, 1024 * 1024); // 最多100条消息或1MB
 
     /* 5. 启动客户端（开始连接并启动服务线程）*/
-    if (!wsl_start(client)) {
+    if (!wsld_start(client)) {
         fprintf(stderr, "错误: 启动客户端失败\n");
-        wsl_destroy(client);
+        wsld_destroy(client);
         return 1;
     }
 
@@ -144,7 +144,7 @@ int main(int argc, char *argv[]) {
         char msg[256];
         snprintf(msg, sizeof(msg), "Hello from client! Message #%d", ++msg_count);
 
-        LwsClientRet_e ret = wsl_send(client, msg, strlen(msg));
+        LwsClientRet_e ret = wsld_send(client, msg, strlen(msg));
         if (ret == LWS_OK) {
             printf("[发送] %s\n", msg);
         } else if (ret == LWS_ERR_QUEUE_FULL) {
@@ -156,7 +156,7 @@ int main(int argc, char *argv[]) {
 
     /* 5. 清理资源 */
     printf("\n正在关闭客户端...\n");
-    wsl_destroy(client);
+    wsld_destroy(client);
     printf("客户端已关闭\n");
 
     return 0;

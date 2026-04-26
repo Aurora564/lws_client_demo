@@ -48,7 +48,7 @@ struct wsp_client {
     int          port;
     char        *proto_name;
     char        *path;
-    wsl_rx_cb_t  rx_cb;
+    wsld_rx_cb_t  rx_cb;
     void        *user;
 
     int          use_ssl;
@@ -540,7 +540,7 @@ void wsp_pool_destroy(wsp_pool_t *pool)
 
 wsp_client_t *wsp_client_create(const char *host, int port,
                                   const char *protocol,
-                                  wsl_rx_cb_t rx_cb, void *user)
+                                  wsld_rx_cb_t rx_cb, void *user)
 {
     if (!host || port <= 0) return NULL;
 

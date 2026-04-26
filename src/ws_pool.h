@@ -26,7 +26,7 @@
  */
 
 #pragma once
-#include "ws_client.h"   /* LwsClientRet_e, wsl_rx_cb_t */
+#include "ws_client.h"   /* LwsClientRet_e, wsld_rx_cb_t */
 
 #ifdef __cplusplus
 extern "C" {
@@ -75,7 +75,7 @@ void wsp_pool_destroy(wsp_pool_t *pool);
  */
 wsp_client_t *wsp_client_create(const char *host, int port,
                                   const char *protocol,
-                                  wsl_rx_cb_t rx_cb, void *user);
+                                  wsld_rx_cb_t rx_cb, void *user);
 
 /* 以下 set 函数须在 wsp_pool_add() 前调用 */
 void wsp_set_ping(wsp_client_t *c, int interval_ms, int pong_timeout_ms);

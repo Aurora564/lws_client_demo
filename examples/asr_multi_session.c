@@ -2,11 +2,11 @@
  * asr_multi_session.c - ASR 多会话并发示例
  *
  * 场景: 智能会议系统，多个用户同时进行实时语音识别。
- *       每个用户独立持有一个 wsl_client_t 实例（独立线程 + 独立 lws_context），
+ *       每个用户独立持有一个 wsld_client_t 实例（独立线程 + 独立 lws_context），
  *       互不干扰，天然支持不同协议/路径/语言参数。
  *
  * 生命周期:
- *   wsl_create → wsl_set_* → wsl_start → wsl_send_binary(loop) → wsl_stop → wsl_destroy
+ *   wsld_create → wsld_set_* → wsld_start → wsld_send_binary(loop) → wsld_stop → wsld_destroy
  *
  * 编译:
  *   cmake --build build && ./build/app/asr_multi_session
@@ -41,7 +41,7 @@ static void msleep(long ms)
 typedef struct {
     char            user_id[32];
     char            room_id[32];
-    wsl_client_t   *client;
+    wsld_client_t   *client;
     volatile int    is_speaking;
     int             chunks_sent;
     int             results_recv;
@@ -79,21 +79,21 @@ static int session_start(asr_session_t *s, const char *host, int port, int use_s
     char path[128];
     snprintf(path, sizeof(path), "/ws/asr?user=%s&room=%s", s->user_id, s->room_id);
 
-    s->client = wsl_create(host, port, "asr-protocol", on_asr_result, s);
+    s->client = wsld_create(host, port, "asr-protocol", on_asr_result, s);
     if (!s->client) {
-        fprintf(stderr, "[ERR] wsl_create failed for %s\n", s->user_id);
+        fprintf(stderr, "[ERR] wsld_create failed for %s\n", s->user_id);
         return -1;
     }
 
-    wsl_set_ssl(s->client, use_ssl, 0);
-    wsl_set_path(s->client, path);
-    wsl_set_ping(s->client, 15000, 5000);
-    wsl_set_reconnect(s->client, 500, 10000);
-    wsl_set_queue_limit(s->client, 50, 512 * 1024);
+    wsld_set_ssl(s->client, use_ssl, 0);
+    wsld_set_path(s->client, path);
+    wsld_set_ping(s->client, 15000, 5000);
+    wsld_set_reconnect(s->client, 500, 10000);
+    wsld_set_queue_limit(s->client, 50, 512 * 1024);
 
-    if (!wsl_start(s->client)) {
-        fprintf(stderr, "[ERR] wsl_start failed for %s\n", s->user_id);
-        wsl_destroy(s->client);
+    if (!wsld_start(s->client)) {
+        fprintf(stderr, "[ERR] wsld_start failed for %s\n", s->user_id);
+        wsld_destroy(s->client);
         s->client = NULL;
         return -1;
     }
@@ -105,8 +105,8 @@ static int session_start(asr_session_t *s, const char *host, int port, int use_s
 static void session_stop(asr_session_t *s)
 {
     if (!s->client) return;
-    wsl_stop(s->client);
-    wsl_destroy(s->client);
+    wsld_stop(s->client);
+    wsld_destroy(s->client);
     s->client = NULL;
     printf("[-] %-10s (room:%-8s) session stopped  chunks=%d results=%d\n",
            s->user_id, s->room_id, s->chunks_sent, s->results_recv);
@@ -132,7 +132,7 @@ static void *speaking_thread(void *arg)
     s->is_speaking = 1;
 
     for (int i = 0; i < total_chunks && g_sys.running; i++) {
-        LwsClientRet_e ret = wsl_send_binary(s->client, audio, sizeof(audio));
+        LwsClientRet_e ret = wsld_send_binary(s->client, audio, sizeof(audio));
         if (ret == LWS_OK) {
             s->chunks_sent++;
         } else if (ret == LWS_ERR_QUEUE_FULL) {
