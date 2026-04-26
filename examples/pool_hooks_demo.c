@@ -42,7 +42,7 @@ static void demo_basic_hooks(void)
     if (!pool) { printf("[basic] pool create failed\n"); return; }
 
     wsp_client_t *c = wsp_client_create("127.0.0.1", 8080,
-                                         NULL, NULL, NULL);
+                                         "ws", NULL, NULL);
     if (!c) {
         printf("[basic] client create failed\n");
         wsp_pool_destroy(pool);
